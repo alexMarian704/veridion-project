@@ -1,6 +1,6 @@
 import express from 'express';
 import { extractUrlFromCSV, mergeWebsiteData } from './csvParser.js';
-import { elasticClient, createIndex, saveDataToElasticsearch } from './elasticClient.js';
+import { elasticClient, createIndex, saveDataToElasticsearch, queryData } from './elasticClient.js';
 import { getWebSitesData } from './parseWebsites.js';
 
 const app = express();
@@ -16,16 +16,7 @@ let scrapingStatus = {
 let lastScrapeTime = 0;
 const INDEX_NAME = "websites-data";
 
-app.get('/', async (req, res) => {
-    await createIndex(INDEX_NAME);
-    await elasticClient.reindex({
-        body: {
-            source: { index: 'websites' },
-            dest: { index: INDEX_NAME }
-        }
-    });
-    await elasticClient.indices.delete({ index: 'websites' });
-
+app.get('/', (req, res) => {
     return res.json({ message: "Server is running" });
 })
 
@@ -41,7 +32,7 @@ app.get('/scrape', async (req, res) => {
     const currentTime = Date.now();
     const tenMinutes = 10 * 60 * 1000;
     if (currentTime - lastScrapeTime < tenMinutes) {
-        return res.status(503).json({ message: "The scraper can only be runned once every 10 minutes. You can retrieve the actual data at /map-data or the saved data at /all-data. Please wait." });
+        return res.status(503).json({ message: "The scraper can only be runned once every 10 minutes. Please wait." });
     }
 
     scrapingStatus.scrapedWebsites = 0;
@@ -64,7 +55,7 @@ app.get('/scrape', async (req, res) => {
     }
 });
 
-app.get('/map-data', (req, res) => {
+app.get('/last-scrape', (req, res) => {
     const resultArray = Array.from(websitesDataMap, ([website, websiteData]) => ({
         website: website,
         websiteData: websiteData
@@ -75,100 +66,20 @@ app.get('/map-data', (req, res) => {
 
 app.get('/search', async (req, res) => {
     const { query } = req.query;
-    const queryStrings = query.split(",");
-    if (queryStrings.length != 4)
-        return res.status(400).json({ message: "Wrong number of arguments. You need 4 arguments splitted by ," })
+    let queryStrings = query.split(",");
+    if (queryStrings.length != 4) {
+        const queryParamIndex = req.originalUrl.indexOf("query=") + 6;
+        let queryFull = req.originalUrl.substring(queryParamIndex);
+        queryStrings = queryFull.split(",");
+        if (queryStrings.length != 4)
+            return res.status(400).json({ message: "Wrong number of arguments. You need 4 arguments splitted by ," })
+    }
 
-    const name = queryStrings[0];
-    const phone = queryStrings[1];
-    const website = queryStrings[2];
-    const facebook = queryStrings[3];
-
-    const searchQuery = {
-        index: INDEX_NAME,
-        size: 1,
-        body: {
-            query: {
-                bool: {
-                    should: [
-                        name && {
-                            multi_match: {
-                                query: name,
-                                fields: ['website', 'websiteData.company_commercial_name', 'websiteData.company_legal_name', 'websiteData.company_all_available_names', 'websiteData.socialMedia']
-                            }
-                        },
-                        phone && {
-                            match: { 'websiteData.phone': phone }
-                        },
-                        website && {
-                            multi_match: {
-                                query: website,
-                                fields: ['website', 'websiteData.company_commercial_name', 'websiteData.company_legal_name', 'websiteData.company_all_available_names']
-                            }
-                        },
-                        facebook && {
-                            match: { 'websiteData.socialMedia': facebook }
-                        }
-                    ].filter(Boolean),
-                    minimum_should_match: 1
-                }
-            }
-        }
-    };
-
-    try {
-        let results = await elasticClient.search(searchQuery);
-        if(results.hits.hits.length === 0){
-            const fuzzyQuery = {
-                index: INDEX_NAME,
-                size: 1,
-                body: {
-                    query: {
-                        bool: {
-                            should: [
-                                name && {
-                                    multi_match: {
-                                        query: name,
-                                        fields: ['website', 'websiteData.company_commercial_name', 'websiteData.company_legal_name', 'websiteData.company_all_available_names'],
-                                        fuzziness: "AUTO"
-                                    }
-                                },
-                                phone && {
-                                    fuzzy: {
-                                        'websiteData.phone': {
-                                            value: phone,
-                                            fuzziness: "AUTO"
-                                        }
-                                    }
-                                },
-                                website && {
-                                    multi_match: {
-                                        query: website,
-                                        fields: ['website', 'websiteData.company_commercial_name', 'websiteData.company_legal_name', 'websiteData.company_all_available_names'],
-                                        fuzziness: "AUTO"
-                                    }
-                                },
-                                facebook && {
-                                    fuzzy: {
-                                        'websiteData.socialMedia': {
-                                            value: facebook,
-                                            fuzziness: "AUTO"
-                                        }
-                                    }
-                                }
-                            ].filter(Boolean),
-                            minimum_should_match: 1
-                        }
-                    }
-                }
-            };
-            results = await elasticClient.search(fuzzyQuery);
-        }
-
-        res.json(results);
-    } catch (error) {
-        console.error('Elasticsearch search error:', error);
-        res.status(500).send({ message: 'Internal Server Error' });
+    try{
+        const result = await queryData(queryStrings, INDEX_NAME);
+        return res.json(result);
+    }catch(error){
+        res.status(500).send({ message: error.message });
     }
 });
 
@@ -180,7 +91,7 @@ app.get('/all-data', async (req, res) => {
                 query: {
                     match_all: {}
                 },
-                size: 1000
+                size: websites.length
             }
         });
 
@@ -188,24 +99,6 @@ app.get('/all-data', async (req, res) => {
     } catch (error) {
         console.error('Elasticsearch search error:', error);
         res.status(500).send({ message: 'Internal Server Error' });
-    }
-});
-
-app.get('/delete', async (req, res) => {
-    try {
-        await elasticClient.deleteByQuery({
-            index: INDEX_NAME,
-            body: {
-                query: {
-                    match_all: {}
-                }
-            }
-        });
-
-        res.json({ message: "All data deleted from the index successfully." });
-    } catch (error) {
-        console.error('Error deleting data from the index:', error);
-        res.status(500).json({ message: "Error deleting data from the index." });
     }
 });
 

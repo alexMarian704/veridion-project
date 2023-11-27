@@ -1,13 +1,13 @@
 import { Cluster } from 'puppeteer-cluster';
 import { getDomain } from 'tldts';
 
-
 export async function getWebSitesData(websites, websitesDataMap, scrapingStatus) {
     const cluster = await Cluster.launch({
         concurrency: Cluster.CONCURRENCY_CONTEXT,
         maxConcurrency: 25,
         puppeteerOptions: {
-            headless: "new"
+            headless: "new",
+            ignoreHTTPSErrors:true
         }
     });
 
@@ -34,7 +34,6 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
                 const bodyContent = await page.evaluate(() => document.body.innerText);
 
                 const phoneRegex = /(\+\d{1,3}([- ])\d{1,4}\2\d{1,4}\2\d{1,4})|(\b\d{3}[-.]\d{3}[-.]\d{4}\b)|(\(\d{3}\)\s\d{3}[-.]\d{4})|(\+\d{1,3}\s\(\d{3}\)\s\d{3}[-.]\d{4})/g
-
                 let phoneNumbers = bodyContent.match(phoneRegex) || [];
                 phoneNumbers = phoneNumbers.filter(match => match.length >= 10);
 
@@ -102,8 +101,6 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
                     });
                     const contactLinks = Array.from(uniqueUrls);
 
-                    console.log(contactLinks);
-
                     for (const contactLink of contactLinks) {
                         if (contactLink.length != 0 && contactLink != url && !contactLink.includes('@')) {
                             const contactLinkUrl = new URL(contactLink);
@@ -124,8 +121,6 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
         }
     });
 
-    //const first50Websites = websites.slice(826, 844);
-    //const first50Websites = websites.slice(919, 923);
     for (const website of websites) {
         const formattedUrl = `https://${website}`;
         cluster.queue(formattedUrl);
