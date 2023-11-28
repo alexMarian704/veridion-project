@@ -60,6 +60,7 @@ export async function saveDataToElasticsearch(websitesDataMap, indexName) {
     for (const entry of resultArray) {
         await elasticClient.index({
             index: indexName,
+            id:entry.website,
             body: entry
         });
     }

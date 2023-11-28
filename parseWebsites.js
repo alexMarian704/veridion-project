@@ -131,8 +131,7 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
         }
     });
 
-    const first50Websites = websites.slice(112, 114);
-    for (const website of first50Websites) {
+    for (const website of websites) {
         const formattedUrl = `https://${website}`;
         cluster.queue(formattedUrl);
     }
