@@ -7,7 +7,7 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
         maxConcurrency: 25,
         puppeteerOptions: {
             headless: "new",
-            ignoreHTTPSErrors:true
+            ignoreHTTPSErrors: true
         }
     });
 
@@ -44,9 +44,19 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
 
                 const urlObj = new URL(url);
 
-                const socialMediaLinks = links.filter(linkObj => {
-                    return linkObj.href.includes('facebook') || linkObj.href.includes('twitter') || linkObj.href.includes('linkedin') || linkObj.href.includes('instagram');
-                }).map(linkObj => linkObj.href);
+                const socialMediaLinks = links
+                    .filter(linkObj => {
+                        try {
+                            const isSocialMedia = linkObj.href.includes('facebook') || linkObj.href.includes('twitter') || linkObj.href.includes('linkedin') || linkObj.href.includes('instagram');
+                            if (!isSocialMedia) return false;
+
+                            const url = new URL(linkObj.href);
+                            return url.pathname !== '/' && url.pathname !== '';
+                        } catch (error) {
+                            return false;
+                        }
+                    })
+                    .map(linkObj => linkObj.href);
 
                 const addressContent = await page.$$eval('address', elements => elements.map(el => el.textContent.trim()));
                 let address = addressContent.length > 0 ? addressContent : [];
@@ -70,7 +80,7 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
 
                 let hostname = urlObj.hostname;
                 if (hostname.startsWith("www.")) hostname = hostname.slice(4);
-                if(websitesDataMap.has(getDomain(hostname))){
+                if (websitesDataMap.has(getDomain(hostname))) {
                     hostname = getDomain(hostname);
                 }
 
@@ -121,7 +131,8 @@ export async function getWebSitesData(websites, websitesDataMap, scrapingStatus)
         }
     });
 
-    for (const website of websites) {
+    const first50Websites = websites.slice(112, 114);
+    for (const website of first50Websites) {
         const formattedUrl = `https://${website}`;
         cluster.queue(formattedUrl);
     }
